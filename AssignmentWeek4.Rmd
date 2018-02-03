@@ -1,0 +1,178 @@
+---
+title: "Practical Machine Learning"
+author: "J Rosmus"
+date: "February 3, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Practical machine Learning - Predicting Exercise from Activity
+
+### I. Overview
+In this report we will look at the dat available from http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. This data utilizes accelerometers on the belt, forarm, arm, and dumbell of 6 participants as they exercise. A brief description of the work with the summary results is presented adn then followed by all of the code used in this report.
+
+### II. Loading Data and Exploratory Analysis
+A number of librariers will be needed in order to run this analysis. The first step is going to be to create the correct environment. To do this, I loaded in the appropriate libraries
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+I downloaded these sets and then looked at their dimensions. Both the training set and the test set had 160 variables. There were a number of NAs to be removed and a Near Zero Variance and ID variables were removed as well. This left 54 variables in the test and training sets.
+
+Our aim is to figure out which exercise was done. The best place to start is to look at how the variables correlate. If you look in section II d. below, you will see a chart where the stronger correlations are in darker colors. Fortunately, the number of correlations is not huge. So we can move on to building our predictive model. 
+
+### III. Prediction Model Building
+In this analysis, I am using three predictive models. i am using the Random Forest, Decision Tree, and Generalized Boosted model. The result with the highest accuracy will be used to predict the exercise.
+For each of the 3 methods, you can see the Confusion Matrix which details the information for cross-validation. The accuracy is given above each plot.
+The accuracy results are as follows:
+       Random Forest: 0.9978
+       Decision Tree: 0.7359
+   Generalized Boost: 0.9874
+
+For this reason, Random Forest will be used to predict the exercises done in the test set.
+
+### IV. Predicting the test results
+The final results of the prediction are:
+ [1] B A B A A E D B A A B C B A E E A B B B
+ Levels: A B C D E
+
+To repeat this was done using Random Forest Model on the Training data. 
+
+
+### II a. setting up the environment
+```{r setupEnv}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)   # make sure you have loaded this in the console. It will prompt you to load GTK+. VERY IMPORTANT
+library(randomForest)
+library(corrplot)
+library(e1071)
+library(pillar)
+library(ggplot2)
+set.seed(1337)
+```
+
+### II b. Downloading data
+
+```{r loadin, cache=TRUE}
+# set the URL for the download
+TrainFile <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestSet  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+training <- read.csv(url(TrainFile))
+testing  <- read.csv(url(TestSet))
+
+# create a partition with the training dataset 
+inTrain  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+TrainSet <- training[inTrain, ]
+TestSet  <- training[-inTrain, ]
+dim(TrainSet)
+dim(TestSet)
+```
+### II c. Cleaing data
+```{r cleanup, cache=TRUE}
+# remove the NZV
+NZV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZV]
+TestSet  <- TestSet[, -NZV]
+# remove the NAs
+AllNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, AllNA==FALSE]
+TestSet  <- TestSet[, AllNA==FALSE]
+# remove the ID variables
+TrainSet <- TrainSet[, -(1:5)]
+TestSet  <- TestSet[, -(1:5)]
+dim(TrainSet)
+dim(TestSet)
+```
+
+### II d. Correlation Analysis
+```{r correl, cache=TRUE}
+corMatrix <- cor(TrainSet[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+### III a. Random Forest
+```{r randForestFit, cache=TRUE}
+set.seed(1337)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRandForest <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modFitRandForest$finalModel
+```
+
+```{r randForestPredict, cache=TRUE}
+predictRandForest <- predict(modFitRandForest, newdata=TestSet)
+confMatRandForest <- confusionMatrix(predictRandForest, TestSet$classe)
+confMatRandForest
+```
+
+```{r randForestPlot, cache=TRUE}
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+     round(confMatRandForest$overall['Accuracy'], 4)))
+```
+
+### III b. Decision Tree
+```{r decTreeFit, cache=TRUE}
+set.seed(1337)
+modFitDecTree <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(modFitDecTree)
+```
+
+```{r decTreePredict, cache=TRUE}
+predictDecTree <- predict(modFitDecTree, newdata=TestSet, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, TestSet$classe)
+confMatDecTree
+```
+
+```{r decTreePlot, cache=TRUE}
+plot(confMatDecTree$table, col = confMatDecTree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+     round(confMatDecTree$overall['Accuracy'], 4)))
+```
+
+### III c. Generalized Boost Model
+```{r boostFit, cache=TRUE}
+set.seed(1337)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+```
+
+```{r boostPredict, cache=TRUE}
+predictGBM <- predict(modFitGBM, newdata=TestSet)
+confMatGBM <- confusionMatrix(predictGBM, TestSet$classe)
+confMatGBM
+```
+
+```{r boostPlot, cache=TRUE}
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+```
+
+### IV. Prediction Test
+```{r prediction, cache=TRUE}
+predictTEST <- predict(modFitRandForest, newdata=testing)
+predictTEST
+```
+
+
+
+
+
+
+
+
+
